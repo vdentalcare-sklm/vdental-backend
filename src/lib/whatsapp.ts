@@ -1,4 +1,4 @@
-// Single place to update when Meta releases a new Graph API version
+// lib/whatsapp.ts
 const GRAPH_API_VERSION = 'v19.0';
 
 const getWhatsAppUrl = () => {
@@ -16,9 +16,6 @@ const getHeaders = () => {
   };
 };
 
-/**
- * Helper: sends a request and throws a descriptive error if Meta rejects it.
- */
 async function sendToMeta(body: object): Promise<{ message_id?: string }> {
   const res = await fetch(getWhatsAppUrl(), {
     method: 'POST',
@@ -29,12 +26,10 @@ async function sendToMeta(body: object): Promise<{ message_id?: string }> {
   const data = await res.json();
 
   if (!res.ok) {
-    // Meta returns structured error details — log them for debugging
     console.error('Meta API error:', JSON.stringify(data));
     throw new Error(data?.error?.message ?? `Meta API returned ${res.status}`);
   }
 
-  // Return the message ID so callers can store it for delivery tracking
   return { message_id: data?.messages?.[0]?.id };
 }
 
@@ -52,7 +47,44 @@ export async function sendWhatsAppText(to: string, text: string) {
 }
 
 /**
- * Sends the interactive slot-selection list (free within 24-hour window).
+ * Sends a generic interactive list message.
+ * Used for both date selection and time slot selection.
+ */
+export async function sendToMetaList(
+  to: string,
+  options: {
+    header: string;
+    body: string;
+    footer: string;
+    buttonLabel: string;
+    sectionTitle: string;
+    rows: { id: string; title: string; description?: string }[];
+  }
+) {
+  return sendToMeta({
+    messaging_product: 'whatsapp',
+    to,
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      header: { type: 'text', text: options.header },
+      body: { text: options.body },
+      footer: { text: options.footer },
+      action: {
+        button: options.buttonLabel,
+        sections: [
+          {
+            title: options.sectionTitle,
+            rows: options.rows,
+          },
+        ],
+      },
+    },
+  });
+}
+
+/**
+ * Sends the time slot selection list.
  * Uses real DB slot IDs so the webhook can lock the correct row.
  */
 export async function sendSlotSelectionList(
@@ -60,31 +92,23 @@ export async function sendSlotSelectionList(
   slots: { id: number; time: string }[]
 ) {
   const rows = slots.map(slot => ({
-    id: `SLOT_${slot.id}`,       // encodes the real DB id
+    id: `SLOT_${slot.id}`,
     title: slot.time,
     description: 'Tap to book this time',
   }));
 
-  return sendToMeta({
-    messaging_product: 'whatsapp',
-    to,
-    type: 'interactive',
-    interactive: {
-      type: 'list',
-      header: { type: 'text', text: 'Available Appointments' },
-      body: { text: 'Please select your preferred time slot.' },
-      footer: { text: 'Day & Night Dental Clinic' },
-      action: {
-        button: 'View Slots',
-        sections: [{ title: 'Available Times', rows }],
-      },
-    },
+  return sendToMetaList(to, {
+    header: 'Available Time Slots',
+    body: 'Please select your preferred appointment time:',
+    footer: 'Day & Night Dental Clinic',
+    buttonLabel: 'View Times',
+    sectionTitle: 'Available Times',
+    rows,
   });
 }
 
 /**
  * Sends a pre-approved marketing template (costs money — used for outreach).
- * Returns the Meta message ID for delivery tracking.
  */
 export async function sendOutreachTemplate(
   to: string,
