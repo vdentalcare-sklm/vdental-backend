@@ -32,7 +32,7 @@ export async function GET(request: Request) {
       FROM      Appointments a
       JOIN      Patients     p ON a.patient_id = p.id
       LEFT JOIN TimeSlots    t ON a.slot_id    = t.id
-      WHERE     (${status} IS NULL OR a.status = ${status})
+      WHERE (${status ?? null}::text IS NULL OR a.status = ${status ?? null}::text)
       ORDER BY  a.created_at DESC
     `;
 

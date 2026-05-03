@@ -19,7 +19,7 @@ export async function seedSlotsIfNeeded(date: string): Promise<void> {
   // Mon–Sat: 9:30 AM – 7:30 PM (last slot starts at 7:30)
   // Sunday:  9:30 AM – 1:00 PM
   const endHour   = dayOfWeek === 0 ? 13 : 19;
-  const endMinute = dayOfWeek === 0 ?  0 : 30;
+  const endMinute = dayOfWeek === 0 ?  0 : 0;
 
   const slots: string[] = [];
   let h = 9, m = 30; // Start at 9:30 AM

@@ -139,14 +139,19 @@ export async function POST(request: Request) {
 
       // ── Scenario A.2: Patient taps "View Slots" quick reply on template ──────
       // This is the button on the booking_initiation template
-      if (msg.type === 'interactive' && msg.interactive?.type === 'button_reply') {
-        const buttonTitle = (msg.interactive.button_reply.title as string).toLowerCase();
-        if (buttonTitle === 'view slots') {
-          // Send date list first, not time slots directly
-          await sendDateSelectionList(senderPhone);
-        }
-      }
+if (msg.type === 'button') {
+  const buttonText = (msg.button.text as string).toLowerCase();
+  if (buttonText === 'view slots') {
+    await sendDateSelectionList(senderPhone);
+  }
+}
 
+if (msg.type === 'interactive' && msg.interactive?.type === 'button_reply') {
+  const buttonTitle = (msg.interactive.button_reply.title as string).toLowerCase();
+  if (buttonTitle === 'view slots') {
+    await sendDateSelectionList(senderPhone);
+  }
+}
 
 
       // ── Scenario B: Patient selects from an interactive list ─────────────────
