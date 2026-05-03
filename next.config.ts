@@ -8,7 +8,8 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Access-Control-Allow-Origin",
-            value: process.env.FRONTEND_URL ?? "*",
+            // Changed to "*" to allow both admin and patient domains
+            value: "*", 
           },
           {
             key: "Access-Control-Allow-Methods",
