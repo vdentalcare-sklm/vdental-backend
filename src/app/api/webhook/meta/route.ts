@@ -147,6 +147,8 @@ export async function POST(request: Request) {
         }
       }
 
+
+
       // ── Scenario B: Patient selects from an interactive list ─────────────────
       if (msg.type === 'interactive' && msg.interactive?.type === 'list_reply') {
         const selectedId    = msg.interactive.list_reply.id as string;
@@ -177,9 +179,19 @@ export async function POST(request: Request) {
             return;
           }
 
-          await sendSlotSelectionList(senderPhone, slots);
+          await sendSlotSelectionList(senderPhone, slots, selectedDate, 0);
           return;
         }
+
+              // ── B.1.5: Pagination — patient tapped "Show Later Times" ──────────────
+if (selectedId.startsWith('MORE_')) {
+  const parts      = selectedId.split('_');
+  const date       = parts[1];
+  const nextIndex  = parseInt(parts[2], 10);
+  const slots      = await getAvailableSlots(date);
+  await sendSlotSelectionList(senderPhone, slots, date, nextIndex);
+  return;
+}
 
         // ── B.2: Patient picked a TIME SLOT ────────────────────────────────────
         if (selectedId.startsWith('SLOT_')) {
@@ -213,7 +225,7 @@ export async function POST(request: Request) {
               await sendDateSelectionList(senderPhone);
             } else {
               await sendWhatsAppText(senderPhone, '⚠️ Sorry, that slot was just taken. Please choose another time:');
-              await sendSlotSelectionList(senderPhone, remaining);
+              await sendSlotSelectionList(senderPhone, remaining, date, 0);
             }
             return;
           }

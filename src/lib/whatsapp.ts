@@ -89,20 +89,32 @@ export async function sendToMetaList(
  */
 export async function sendSlotSelectionList(
   to: string,
-  slots: { id: number; time: string }[]
+  slots: { id: number; time: string }[],
+  date: string,
+  startIndex: number = 0
 ) {
-  const rows = slots.map(slot => ({
+  const batch = slots.slice(startIndex, startIndex + 9);
+
+  const rows = batch.map(slot => ({
     id: `SLOT_${slot.id}`,
     title: slot.time,
     description: 'Tap to book this time',
   }));
+
+  if (slots.length > startIndex + 9) {
+    rows.push({
+      id: `MORE_${date}_${startIndex + 9}`,
+      title: '▶ Show Later Times',
+      description: 'View afternoon & evening slots',
+    });
+  }
 
   return sendToMetaList(to, {
     header: 'Available Time Slots',
     body: 'Please select your preferred appointment time:',
     footer: 'Day & Night Dental Clinic',
     buttonLabel: 'View Times',
-    sectionTitle: 'Available Times',
+    sectionTitle: startIndex === 0 ? 'Morning Slots' : 'Later Slots',
     rows,
   });
 }
