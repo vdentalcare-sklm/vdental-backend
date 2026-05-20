@@ -8,7 +8,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { name, phone, email, reason } = body;
 
-    // ── Validation ─────────────────────────────────────────────────────────
+// ── Validation ─────────────────────────────────────────────────────────
     if (!name || !phone) {
       return NextResponse.json(
         { error: 'Name and phone are required.' },
@@ -16,14 +16,27 @@ export async function POST(request: Request) {
       );
     }
 
-    const cleanPhone = String(phone).replace(/\D/g, '');
+    // Strip all non-numeric characters (removes +, spaces, dashes)
+    let cleanPhone = String(phone).replace(/\D/g, '');
+
+    // If they included the Indian country code (91) making it 12 digits, remove the 91
+    if (cleanPhone.length === 12 && cleanPhone.startsWith('91')) {
+      cleanPhone = cleanPhone.substring(2);
+    } 
+    // If they added a leading zero making it 11 digits, remove the 0
+    else if (cleanPhone.length === 11 && cleanPhone.startsWith('0')) {
+      cleanPhone = cleanPhone.substring(1);
+    }
+
+    // Now strictly check if the remaining number is exactly 10 digits starting with 6-9
     if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
       return NextResponse.json(
-        { error: 'Enter a valid 10-digit Indian mobile number.' },
+        { error: 'Enter a valid Indian mobile number.' },
         { status: 400 }
       );
     }
 
+    // Format for Meta API
     const whatsappPhone = `91${cleanPhone}`;
 
     // ── Upsert patient ──────────────────────────────────────────────────────

@@ -125,16 +125,22 @@ export async function POST(request: Request) {
       const msg         = messages[0];
       const senderPhone = msg.from;
 
-      // ── Scenario A: Plain text message ───────────────────────────────────────
+// ── Scenario A: Plain text message ───────────────────────────────────────
       if (msg.type === 'text') {
         const textBody = (msg.text.body as string).toLowerCase();
+        
         if (textBody.includes('booking request') || textBody.includes('book')) {
           await sendDateSelectionList(senderPhone);
         } else {
-          await sendWhatsAppText(
-            senderPhone,
-            'Hi! To book an appointment, please visit our website and fill in the booking form.'
-          );
+          // New welcoming fallback message for random texts like "Hi"
+          const welcomeMessage = 
+            `Hi there! 👋 Thanks for reaching out to *Day & Night Dental Clinic*.\n\n` +
+            `To schedule a consultation, you can easily book your appointment directly through our website:\n` +
+            `🌐 https://www.dayandnightdentalclinic.com\n\n` + 
+            `_Alternatively, if you want to book right here on WhatsApp, just reply to this message with the word *"Book"*!_\n\n` +
+            `For emergencies, please call us at +91 8977383622.`;
+
+          await sendWhatsAppText(senderPhone, welcomeMessage);
         }
       }
 

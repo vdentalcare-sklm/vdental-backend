@@ -90,6 +90,18 @@ export async function initializeDatabase() {
       );
     `;
 
+    // 8. Hero Slides
+    await sql`
+      CREATE TABLE IF NOT EXISTS HeroSlides (
+        id SERIAL PRIMARY KEY,
+        image_url TEXT NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        display_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+
     // ── Indexes ───────────────────────────────────────────────────────────────
     await sql`CREATE INDEX IF NOT EXISTS idx_appointments_patient_id      ON Appointments(patient_id);`;
     await sql`CREATE INDEX IF NOT EXISTS idx_appointments_status          ON Appointments(status);`;
