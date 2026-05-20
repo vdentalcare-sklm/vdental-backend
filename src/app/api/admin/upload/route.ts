@@ -28,12 +28,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'File must be an image.' }, { status: 400 });
     }
 
-    // Upload to Vercel Blob
-    // We use the `folder/filename` structure to keep things organized in your bucket
     const blob = await put(`${folder}/${file.name}`, file, {
       access: 'public',
-      // Optional: automatically throw away the original filename and generate a random string
-      // to avoid file overwrite collisions, but keeping it simple for now.
+      addRandomSuffix: true,
     });
 
     // Return the public URL to the admin panel
