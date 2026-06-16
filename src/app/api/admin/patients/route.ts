@@ -1,4 +1,3 @@
-// app/api/admin/patients/route.ts
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 
@@ -6,8 +5,11 @@ function isAuthorized(request: Request): boolean {
   return request.headers.get('authorization') === `Bearer ${process.env.ADMIN_SECRET}`;
 }
 
-// ── GET /api/admin/patients — list all patients ───────────────────────────────
-// Optional query params: ?search=name_or_phone  ?id=123 (single patient)
+// ── GET /api/admin/patients ───────────────────────────────────────────────────
+// Query params:
+//   ?id=123           — single patient + full booking history
+//   ?search=name|phone — search across all patients
+//   ?branchId=1        — filter patients who have booked at a specific branch
 export async function GET(request: Request) {
   if (!isAuthorized(request)) {
     return new NextResponse('Unauthorized', { status: 401 });
@@ -15,13 +17,14 @@ export async function GET(request: Request) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const search     = searchParams.get('search') ?? '';
-    const patientId  = searchParams.get('id');
+    const patientId = searchParams.get('id');
+    const search    = searchParams.get('search') ?? '';
+    const branchId  = searchParams.get('branchId');
 
-    // ── Single patient + booking history ─────────────────────────────────────
+    // ── Single patient + full booking history ─────────────────────────────────
     if (patientId) {
       const patient = await sql`
-        SELECT id, name, phone, email, created_at, do_not_contact
+        SELECT id, name, phone, email, created_at
         FROM   Patients
         WHERE  id = ${patientId}
       `;
@@ -32,14 +35,17 @@ export async function GET(request: Request) {
 
       const history = await sql`
         SELECT
-          a.id     AS appointment_id,
+          a.id                            AS appointment_id,
           a.reason,
           a.status,
           a.created_at,
-          t.date   AS slot_date,
-          to_char(t.time, 'HH12:MI AM') AS slot_time
+          b.id                            AS branch_id,
+          b.name                          AS branch_name,
+          to_char(t.date, 'YYYY-MM-DD')  AS slot_date,
+          to_char(t.time, 'HH12:MI AM')  AS slot_time
         FROM      Appointments a
-        LEFT JOIN TimeSlots    t ON a.slot_id = t.id
+        JOIN      Branches     b ON a.branch_id  = b.id
+        LEFT JOIN TimeSlots    t ON a.slot_id    = t.id
         WHERE     a.patient_id = ${patientId}
         ORDER BY  a.created_at DESC
       `;
@@ -51,7 +57,7 @@ export async function GET(request: Request) {
       });
     }
 
-    // ── Patient list with optional search ─────────────────────────────────────
+    // ── Patient list with optional search + branch filter ─────────────────────
     const patients = await sql`
       SELECT
         p.id,
@@ -59,16 +65,24 @@ export async function GET(request: Request) {
         p.phone,
         p.email,
         p.created_at,
-        p.do_not_contact,
-        COUNT(a.id)::int AS total_bookings,
-        MAX(t.date)          AS last_appointment_date
+        COUNT(a.id)::int                AS total_bookings,
+        MAX(to_char(t.date, 'YYYY-MM-DD')) AS last_appointment_date,
+        STRING_AGG(DISTINCT b.name, ', ' ORDER BY b.name) AS branches_visited
       FROM      Patients     p
       LEFT JOIN Appointments a ON a.patient_id = p.id
+      LEFT JOIN Branches     b ON a.branch_id  = b.id
       LEFT JOIN TimeSlots    t ON a.slot_id    = t.id
       WHERE
-        ${search} = ''
-        OR p.name  ILIKE ${'%' + search + '%'}
-        OR p.phone ILIKE ${'%' + search + '%'}
+        (
+          ${search} = ''
+          OR p.name  ILIKE ${'%' + search + '%'}
+          OR p.phone ILIKE ${'%' + search + '%'}
+        )
+        AND
+        (
+          ${branchId ?? null}::integer IS NULL
+          OR a.branch_id = ${branchId ?? null}::integer
+        )
       GROUP BY p.id
       ORDER BY p.created_at DESC
     `;
@@ -81,27 +95,27 @@ export async function GET(request: Request) {
   }
 }
 
-// ── PATCH /api/admin/patients — toggle do_not_contact ────────────────────────
+// ── PATCH /api/admin/patients — update patient details ───────────────────────
+// Body: { id: number, name?: string, email?: string }
 export async function PATCH(request: Request) {
   if (!isAuthorized(request)) {
     return new NextResponse('Unauthorized', { status: 401 });
   }
 
   try {
-    const { id, do_not_contact } = await request.json();
+    const { id, name, email } = await request.json();
 
-    if (!id || typeof do_not_contact !== 'boolean') {
-      return NextResponse.json(
-        { error: 'id and do_not_contact (boolean) are required.' },
-        { status: 400 }
-      );
+    if (!id) {
+      return NextResponse.json({ error: 'id is required.' }, { status: 400 });
     }
 
     const result = await sql`
       UPDATE Patients
-      SET    do_not_contact = ${do_not_contact}
-      WHERE  id             = ${id}
-      RETURNING id, name, do_not_contact
+      SET
+        name  = COALESCE(${name?.trim()  ?? null}, name),
+        email = COALESCE(${email?.trim() ?? null}, email)
+      WHERE id = ${id}
+      RETURNING id, name, phone, email
     `;
 
     if (result.length === 0) {

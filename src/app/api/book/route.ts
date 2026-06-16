@@ -1,4 +1,3 @@
-// app/api/book/route.ts
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { sendOutreachTemplate } from '@/lib/whatsapp';
@@ -8,7 +7,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { name, phone, email, reason } = body;
 
-// ── Validation ─────────────────────────────────────────────────────────
+    // ── Validation ────────────────────────────────────────────────────────────
     if (!name || !phone) {
       return NextResponse.json(
         { error: 'Name and phone are required.' },
@@ -16,19 +15,15 @@ export async function POST(request: Request) {
       );
     }
 
-    // Strip all non-numeric characters (removes +, spaces, dashes)
+    // ── Phone sanitization ────────────────────────────────────────────────────
     let cleanPhone = String(phone).replace(/\D/g, '');
 
-    // If they included the Indian country code (91) making it 12 digits, remove the 91
     if (cleanPhone.length === 12 && cleanPhone.startsWith('91')) {
       cleanPhone = cleanPhone.substring(2);
-    } 
-    // If they added a leading zero making it 11 digits, remove the 0
-    else if (cleanPhone.length === 11 && cleanPhone.startsWith('0')) {
+    } else if (cleanPhone.length === 11 && cleanPhone.startsWith('0')) {
       cleanPhone = cleanPhone.substring(1);
     }
 
-    // Now strictly check if the remaining number is exactly 10 digits starting with 6-9
     if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
       return NextResponse.json(
         { error: 'Enter a valid Indian mobile number.' },
@@ -36,10 +31,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Format for Meta API
     const whatsappPhone = `91${cleanPhone}`;
 
-    // ── Upsert patient ──────────────────────────────────────────────────────
+    // ── Upsert patient ────────────────────────────────────────────────────────
     const patientResult = await sql`
       INSERT INTO Patients (name, phone, email)
       VALUES (${name.trim()}, ${whatsappPhone}, ${email?.trim() ?? null})
@@ -50,30 +44,52 @@ export async function POST(request: Request) {
     `;
     const patientId = patientResult[0].id;
 
-    // ── Create pending appointment ──────────────────────────────────────────
-    await sql`
-      INSERT INTO Appointments (patient_id, reason, status)
-      VALUES (${patientId}, ${reason?.trim() ?? null}, 'Pending')
+    // ── Get default branch (is_main = TRUE) as a fallback ────────────────────
+    // The actual branch will be confirmed by the patient via WhatsApp
+    const mainBranch = await sql`
+      SELECT id FROM Branches WHERE is_main = TRUE AND is_active = TRUE LIMIT 1
     `;
 
-    // ── Send initiation template ────────────────────────────────────────────
-    // The clinic sends the first WhatsApp message automatically.
-    // Template "booking_initiation" must be approved in Meta dashboard.
+    // If somehow no main branch exists, grab the first active one
+    const fallbackBranch = mainBranch.length === 0
+      ? await sql`SELECT id FROM Branches WHERE is_active = TRUE ORDER BY display_order ASC LIMIT 1`
+      : mainBranch;
+
+    if (fallbackBranch.length === 0) {
+      console.error('No active branches found in database.');
+      return NextResponse.json(
+        { error: 'No branches are currently available. Please call us.' },
+        { status: 503 }
+      );
+    }
+
+    const branchId = fallbackBranch[0].id;
+
+    // ── Create pending appointment ────────────────────────────────────────────
+    // Status is Pending — branch will be confirmed/updated via WhatsApp flow
+    // slot_id is null until patient picks a time slot on WhatsApp
+    await sql`
+      INSERT INTO Appointments (patient_id, branch_id, reason, status)
+      VALUES (${patientId}, ${branchId}, ${reason?.trim() ?? null}, 'Pending')
+    `;
+
+    // ── Send booking initiation template ──────────────────────────────────────
+    // This fires the first WhatsApp message to the patient.
+    // Template "booking_initiation" must be approved in Meta Business dashboard.
     // {{1}} = patient name, {{2}} = reason for visit
-    // When the patient replies to this message, the 24-hour free window
-    // opens and the webhook sends the slot list at no cost.
-await sendOutreachTemplate(
+    // When the patient replies, the webhook takes over with Branch → Date → Time flow.
+    await sendOutreachTemplate(
       whatsappPhone,
       'booking_initiation',
       [
-        name.trim(), 
+        name.trim(),
         reason?.trim() || 'your dental visit',
       ]
     );
 
     return NextResponse.json({
       success: true,
-      message: 'Appointment initiated. WhatsApp message sent.',
+      message: 'Appointment request received. Please check WhatsApp to complete your booking.',
     });
 
   } catch (error) {

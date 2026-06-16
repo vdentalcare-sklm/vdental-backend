@@ -1,4 +1,3 @@
-// app/api/admin/slots/route.ts
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { seedSlotsIfNeeded } from '@/lib/slots';
@@ -7,7 +6,7 @@ function isAuthorized(request: Request): boolean {
   return request.headers.get('authorization') === `Bearer ${process.env.ADMIN_SECRET}`;
 }
 
-// ── GET /api/admin/slots?date=YYYY-MM-DD — slots for a specific date ──────────
+// ── GET /api/admin/slots?branchId=1&date=YYYY-MM-DD ──────────────────────────
 export async function GET(request: Request) {
   if (!isAuthorized(request)) {
     return new NextResponse('Unauthorized', { status: 401 });
@@ -15,7 +14,15 @@ export async function GET(request: Request) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const date = searchParams.get('date');
+    const branchId = searchParams.get('branchId');
+    const date     = searchParams.get('date');
+
+    if (!branchId) {
+      return NextResponse.json(
+        { error: 'branchId is required.' },
+        { status: 400 }
+      );
+    }
 
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return NextResponse.json(
@@ -24,7 +31,15 @@ export async function GET(request: Request) {
       );
     }
 
-    await seedSlotsIfNeeded(date);
+    // Verify branch exists
+    const branch = await sql`
+      SELECT id FROM Branches WHERE id = ${branchId} AND is_active = TRUE LIMIT 1
+    `;
+    if (branch.length === 0) {
+      return NextResponse.json({ error: 'Branch not found.' }, { status: 404 });
+    }
+
+    await seedSlotsIfNeeded(date, Number(branchId));
 
     const slots = await sql`
       SELECT
@@ -34,13 +49,15 @@ export async function GET(request: Request) {
         p.name  AS booked_by_name,
         p.phone AS booked_by_phone
       FROM      TimeSlots    t
-      LEFT JOIN Appointments a ON a.slot_id    = t.id AND a.status != 'Cancelled'
+      LEFT JOIN Appointments a ON a.slot_id    = t.id
+                               AND a.status   != 'Cancelled'
       LEFT JOIN Patients     p ON a.patient_id = p.id
-      WHERE t.date = ${date}::date
+      WHERE t.branch_id = ${branchId}
+        AND t.date      = ${date}::date
       ORDER BY t.time ASC
     `;
 
-    return NextResponse.json({ success: true, date, slots });
+    return NextResponse.json({ success: true, branch_id: Number(branchId), date, slots });
 
   } catch (error) {
     console.error('Fetch slots error:', error);
@@ -48,26 +65,37 @@ export async function GET(request: Request) {
   }
 }
 
-// ── POST /api/admin/slots — add a new slot ────────────────────────────────────
+// ── POST /api/admin/slots — add a custom slot ─────────────────────────────────
+// Body: { branchId: number, date: "YYYY-MM-DD", time: "HH:MM" }
 export async function POST(request: Request) {
   if (!isAuthorized(request)) {
     return new NextResponse('Unauthorized', { status: 401 });
   }
 
   try {
-    const { date, time } = await request.json();
+    const { branchId, date, time } = await request.json();
 
-    if (!date || !time) {
+    if (!branchId || !date || !time) {
       return NextResponse.json(
-        { error: 'date and time are required.' },
+        { error: 'branchId, date, and time are required.' },
         { status: 400 }
       );
     }
 
-    // Validate date is not in the past
-    const slotDate = new Date(date);
+    // Verify branch exists
+    const branch = await sql`
+      SELECT id FROM Branches WHERE id = ${branchId} AND is_active = TRUE LIMIT 1
+    `;
+    if (branch.length === 0) {
+      return NextResponse.json({ error: 'Branch not found.' }, { status: 404 });
+    }
+
+    // Reject past dates
+    const [year, month, day] = date.split('-').map(Number);
+    const slotDate = new Date(year, month - 1, day);
     const today    = new Date();
     today.setHours(0, 0, 0, 0);
+
     if (slotDate < today) {
       return NextResponse.json(
         { error: 'Cannot add slots for past dates.' },
@@ -76,15 +104,15 @@ export async function POST(request: Request) {
     }
 
     const result = await sql`
-      INSERT INTO TimeSlots (date, time)
-      VALUES (${date}::date, ${time}::time)
-      ON CONFLICT (date, time) DO NOTHING
-      RETURNING id, date, to_char(time, 'HH12:MI AM') AS time
+      INSERT INTO TimeSlots (branch_id, date, time)
+      VALUES (${branchId}, ${date}::date, ${time}::time)
+      ON CONFLICT (branch_id, date, time) DO NOTHING
+      RETURNING id, branch_id, date, to_char(time, 'HH12:MI AM') AS time
     `;
 
     if (result.length === 0) {
       return NextResponse.json(
-        { error: 'A slot at this time already exists for this date.' },
+        { error: 'A slot at this time already exists for this branch and date.' },
         { status: 409 }
       );
     }
@@ -98,6 +126,7 @@ export async function POST(request: Request) {
 }
 
 // ── DELETE /api/admin/slots — remove an unbooked slot ────────────────────────
+// Body: { id: number }
 export async function DELETE(request: Request) {
   if (!isAuthorized(request)) {
     return new NextResponse('Unauthorized', { status: 401 });
@@ -110,8 +139,9 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'slot id is required.' }, { status: 400 });
     }
 
-    // Refuse to delete a booked slot
-    const slot = await sql`SELECT is_booked FROM TimeSlots WHERE id = ${id}`;
+    const slot = await sql`
+      SELECT is_booked FROM TimeSlots WHERE id = ${id}
+    `;
 
     if (slot.length === 0) {
       return NextResponse.json({ error: 'Slot not found.' }, { status: 404 });

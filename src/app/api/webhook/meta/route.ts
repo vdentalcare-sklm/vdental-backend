@@ -1,4 +1,3 @@
-// app/api/webhook/meta/route.ts
 import { NextResponse } from 'next/server';
 import { after } from 'next/server';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -26,29 +25,31 @@ function getTodayIST(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
-async function getUpcomingDates(count = 6): Promise<{ value: string; label: string }[]> {
+async function getUpcomingDates(
+  count = 10,
+  branchId: number
+): Promise<{ value: string; label: string }[]> {
   const dates: { value: string; label: string }[] = [];
-  
-  // 1. Get Today's YYYY-MM-DD string specifically in IST
+
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-  
-  // 2. Break it into numbers to create a "Local" Date object (prevents 7 PM roll-over)
   const [year, month, day] = todayStr.split('-').map(Number);
-  let d = new Date(year, month - 1, day); 
-  
+  let d = new Date(year, month - 1, day);
+
   let checked = 0;
   while (dates.length < count && checked < 30) {
-    // 3. Format back to YYYY-MM-DD manually
-    const iso = d.getFullYear() + '-' + 
-                String(d.getMonth() + 1).padStart(2, '0') + '-' + 
-                String(d.getDate()).padStart(2, '0');
+    const iso =
+      d.getFullYear() +
+      '-' +
+      String(d.getMonth() + 1).padStart(2, '0') +
+      '-' +
+      String(d.getDate()).padStart(2, '0');
 
-    const blocked = await isDateBlocked(iso);
+    const blocked = await isDateBlocked(iso, branchId);
     if (!blocked) {
       const label = d.toLocaleDateString('en-IN', {
         weekday: 'short',
         day: 'numeric',
-        month: 'short'
+        month: 'short',
       });
       dates.push({ value: iso, label });
     }
@@ -59,29 +60,63 @@ async function getUpcomingDates(count = 6): Promise<{ value: string; label: stri
   return dates;
 }
 
+// ─── Send branch selection list ───────────────────────────────────────────────
+
+async function sendBranchSelectionList(to: string): Promise<void> {
+  const branches = await sql`
+    SELECT id, name, address
+    FROM   Branches
+    WHERE  is_active = TRUE
+    ORDER  BY display_order ASC
+  `;
+
+  if (branches.length === 0) {
+    await sendWhatsAppText(
+      to,
+      'Sorry, no branches are currently available. Please call us for assistance.'
+    );
+    return;
+  }
+
+  const rows = branches.map((b: any) => ({
+    id: `BRANCH_${b.id}`,
+    title: b.name,
+    description: b.address,
+  }));
+
+  await sendToMetaList(to, {
+    header: 'Select a Branch',
+    body: 'Please choose your preferred V Dental branch:',
+    footer: 'V Dental Hospitals',
+    buttonLabel: 'View Branches',
+    sectionTitle: 'Our Branches',
+    rows,
+  });
+}
+
 // ─── Send date selection list ─────────────────────────────────────────────────
 
-async function sendDateSelectionList(to: string): Promise<void> {
-  const dates = await getUpcomingDates(10);
+async function sendDateSelectionList(to: string, branchId: number): Promise<void> {
+  const dates = await getUpcomingDates(10, branchId);
 
   if (dates.length === 0) {
     await sendWhatsAppText(
       to,
-      'Sorry, the clinic has no available dates in the next few days. Please call us at +91 8977383622.'
+      'Sorry, there are no available dates at this branch in the next 30 days. Please call us for assistance.'
     );
     return;
   }
 
   const rows = dates.map(d => ({
-    id: `DATE_${d.value}`,       // e.g. DATE_2026-05-10
-    title: d.label,              // e.g. "Sat, 10 May"
+    id: `DATE_${branchId}_${d.value}`,
+    title: d.label,
     description: d.value === getTodayIST() ? 'Today' : '',
   }));
 
   await sendToMetaList(to, {
     header: 'Select a Date',
     body: 'Please choose your preferred appointment date:',
-    footer: 'Day & Night Dental Clinic',
+    footer: 'V Dental Hospitals',
     buttonLabel: 'View Dates',
     sectionTitle: 'Available Dates',
     rows,
@@ -125,92 +160,130 @@ export async function POST(request: Request) {
       const msg         = messages[0];
       const senderPhone = msg.from;
 
-// ── Scenario A: Plain text message ───────────────────────────────────────
+      // ── Scenario A: Plain text message ──────────────────────────────────────
       if (msg.type === 'text') {
         const textBody = (msg.text.body as string).toLowerCase();
-        
-        if (textBody.includes('booking request') || textBody.includes('book')) {
-          await sendDateSelectionList(senderPhone);
+
+        if (textBody.includes('book') || textBody.includes('appointment')) {
+          await sendBranchSelectionList(senderPhone);
         } else {
-          // New welcoming fallback message for random texts like "Hi"
-          const welcomeMessage = 
-            `Hi there! 👋 Thanks for reaching out to *Day & Night Dental Clinic*.\n\n` +
-            `To schedule a consultation, you can easily book your appointment directly through our website:\n` +
-            `🌐 https://www.dayandnightdentalclinic.com\n\n` + 
-            `_Alternatively, if you want to book right here on WhatsApp, just reply to this message with the word *"Book"*!_\n\n` +
-            `For emergencies, please call us at +91 8977383622.`;
+          const welcomeMessage =
+            `Hi there! 👋 Thanks for reaching out to *V Dental Hospitals*.\n\n` +
+            `To schedule a consultation, you can book your appointment directly through our website:\n` +
+            `🌐 https://www.vdentalcare.in\n\n` +
+            `_Alternatively, reply with *"Book"* to book right here on WhatsApp!_\n\n` +
+            `For emergencies, please call us at +91 95505 08480.`;
 
           await sendWhatsAppText(senderPhone, welcomeMessage);
         }
       }
 
-      // ── Scenario A.2: Patient taps "View Slots" quick reply on template ──────
-      // This is the button on the booking_initiation template
-if (msg.type === 'button') {
-  const buttonText = (msg.button.text as string).toLowerCase();
-  if (buttonText === 'view slots') {
-    await sendDateSelectionList(senderPhone);
-  }
-}
+      // ── Scenario A.2: "View Slots" quick reply button on template ───────────
+      if (msg.type === 'button') {
+        const buttonText = (msg.button.text as string).toLowerCase();
+        if (buttonText === 'view slots') {
+          await sendBranchSelectionList(senderPhone);
+        }
+      }
 
-if (msg.type === 'interactive' && msg.interactive?.type === 'button_reply') {
-  const buttonTitle = (msg.interactive.button_reply.title as string).toLowerCase();
-  if (buttonTitle === 'view slots') {
-    await sendDateSelectionList(senderPhone);
-  }
-}
+      if (msg.type === 'interactive' && msg.interactive?.type === 'button_reply') {
+        const buttonTitle = (msg.interactive.button_reply.title as string).toLowerCase();
+        if (buttonTitle === 'view slots') {
+          await sendBranchSelectionList(senderPhone);
+        }
+      }
 
-
-      // ── Scenario B: Patient selects from an interactive list ─────────────────
+      // ── Scenario B: Interactive list reply ──────────────────────────────────
       if (msg.type === 'interactive' && msg.interactive?.type === 'list_reply') {
         const selectedId    = msg.interactive.list_reply.id as string;
         const selectedTitle = msg.interactive.list_reply.title as string;
 
-        // ── B.1: Patient picked a DATE ──────────────────────────────────────────
-        if (selectedId.startsWith('DATE_')) {
-          const selectedDate = selectedId.replace('DATE_', ''); // e.g. 2026-05-10
+        // ── B.1: Patient picked a BRANCH ──────────────────────────────────────
+        if (selectedId.startsWith('BRANCH_')) {
+          const branchId = parseInt(selectedId.replace('BRANCH_', ''), 10);
 
-          const blocked = await isDateBlocked(selectedDate);
-          if (blocked) {
-            await sendWhatsAppText(
-              senderPhone,
-              `Sorry, ${selectedTitle} is not available. Please choose another date:`
-            );
-            await sendDateSelectionList(senderPhone);
+          if (isNaN(branchId)) {
+            console.error('Could not parse branch ID from:', selectedId);
             return;
           }
 
-          const slots = await getAvailableSlots(selectedDate);
+          // Verify branch still exists and is active
+          const branch = await sql`
+            SELECT id FROM Branches WHERE id = ${branchId} AND is_active = TRUE LIMIT 1
+          `;
+
+          if (branch.length === 0) {
+            await sendWhatsAppText(
+              senderPhone,
+              'Sorry, that branch is no longer available. Please choose another:'
+            );
+            await sendBranchSelectionList(senderPhone);
+            return;
+          }
+
+          await sendDateSelectionList(senderPhone, branchId);
+          return;
+        }
+
+        // ── B.2: Patient picked a DATE ────────────────────────────────────────
+        if (selectedId.startsWith('DATE_')) {
+          // Format: DATE_branchId_YYYY-MM-DD
+          const parts      = selectedId.split('_');
+          const branchId   = parseInt(parts[1], 10);
+          const selectedDate = parts.slice(2).join('_'); // handles the date part safely
+
+          if (isNaN(branchId) || !selectedDate) {
+            console.error('Could not parse DATE selection from:', selectedId);
+            return;
+          }
+
+          const blocked = await isDateBlocked(selectedDate, branchId);
+          if (blocked) {
+            await sendWhatsAppText(
+              senderPhone,
+              `Sorry, ${selectedTitle} is not available at this branch. Please choose another date:`
+            );
+            await sendDateSelectionList(senderPhone, branchId);
+            return;
+          }
+
+          const slots = await getAvailableSlots(selectedDate, branchId);
 
           if (slots.length === 0) {
             await sendWhatsAppText(
               senderPhone,
-              `Sorry, there are no available slots on ${selectedTitle}. Please choose another date:`
+              `Sorry, there are no available slots on ${selectedTitle} at this branch. Please choose another date:`
             );
-            await sendDateSelectionList(senderPhone);
+            await sendDateSelectionList(senderPhone, branchId);
             return;
           }
 
-          await sendSlotSelectionList(senderPhone, slots, selectedDate, 0);
+          await sendSlotSelectionList(senderPhone, slots, selectedDate, branchId, 0);
           return;
         }
 
-              // ── B.1.5: Pagination — patient tapped "Show Later Times" ──────────────
-if (selectedId.startsWith('MORE_')) {
-  const parts      = selectedId.split('_');
-  const date       = parts[1];
-  const nextIndex  = parseInt(parts[2], 10);
-  const slots      = await getAvailableSlots(date);
-  await sendSlotSelectionList(senderPhone, slots, date, nextIndex);
-  return;
-}
+        // ── B.3: Pagination — patient tapped "Show Later Times" ───────────────
+        if (selectedId.startsWith('MORE_')) {
+          // Format: MORE_branchId_date_nextIndex
+          const parts     = selectedId.split('_');
+          const branchId  = parseInt(parts[1], 10);
+          const date      = parts[2];
+          const nextIndex = parseInt(parts[3], 10);
 
-        // ── B.2: Patient picked a TIME SLOT ────────────────────────────────────
+          const slots = await getAvailableSlots(date, branchId);
+          await sendSlotSelectionList(senderPhone, slots, date, branchId, nextIndex);
+          return;
+        }
+
+        // ── B.4: Patient picked a TIME SLOT ───────────────────────────────────
         if (selectedId.startsWith('SLOT_')) {
-          const selectedSlotId = parseInt(selectedId.replace('SLOT_', ''), 10);
+          // Format: SLOT_branchId_slotDbId
+          const parts         = selectedId.split('_');
+          const branchId      = parseInt(parts[1], 10);
+          const selectedSlotId = parseInt(parts[2], 10);
 
-          if (isNaN(selectedSlotId)) {
-            console.error('Could not parse slot ID from:', selectedId);
+          if (isNaN(selectedSlotId) || isNaN(branchId)) {
+            console.error('Could not parse SLOT selection from:', selectedId);
             return;
           }
 
@@ -219,93 +292,95 @@ if (selectedId.startsWith('MORE_')) {
             UPDATE TimeSlots
             SET    is_booked = TRUE
             WHERE  id        = ${selectedSlotId}
+              AND  branch_id = ${branchId}
               AND  is_booked = FALSE
             RETURNING id, date, time
           `;
 
           // Slot was taken in a race condition
           if (lockResult.length === 0) {
-            const slotRow = await sql`SELECT date FROM TimeSlots WHERE id = ${selectedSlotId}`;
-            const date    = slotRow[0]?.date as string ?? getTodayIST();
-            const remaining = await getAvailableSlots(date);
+            const slotRow = await sql`
+              SELECT date FROM TimeSlots WHERE id = ${selectedSlotId}
+            `;
+            const date      = slotRow[0]?.date ?? getTodayIST();
+            const remaining = await getAvailableSlots(date, branchId);
 
             if (remaining.length === 0) {
               await sendWhatsAppText(
                 senderPhone,
                 '⚠️ Sorry, that slot was just taken and no others are available for that day. Please choose a different date:'
               );
-              await sendDateSelectionList(senderPhone);
+              await sendDateSelectionList(senderPhone, branchId);
             } else {
-              await sendWhatsAppText(senderPhone, '⚠️ Sorry, that slot was just taken. Please choose another time:');
-              await sendSlotSelectionList(senderPhone, remaining, date, 0);
+              await sendWhatsAppText(
+                senderPhone,
+                '⚠️ Sorry, that slot was just taken. Please choose another time:'
+              );
+              await sendSlotSelectionList(senderPhone, remaining, date, branchId, 0);
             }
             return;
           }
 
-          
-          // Find patient by phone
-          const patientResult = await sql`SELECT id FROM Patients WHERE phone = ${senderPhone}`;
+          // Upsert patient
+          const profileName =
+            body.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.profile?.name ||
+            'WhatsApp User';
 
-          if (patientResult.length === 0) {
-            // Grab their actual WhatsApp name instead of using 'Unknown'
-            const profileName = body.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.profile?.name || 'WhatsApp User';
+          const patientResult = await sql`
+            INSERT INTO Patients (name, phone)
+            VALUES (${profileName}, ${senderPhone})
+            ON CONFLICT (phone) DO UPDATE SET phone = EXCLUDED.phone
+            RETURNING id
+          `;
+          const patientId = patientResult[0].id;
 
-            const newPatient = await sql`
-              INSERT INTO Patients (name, phone)
-              VALUES (${profileName}, ${senderPhone})
-              ON CONFLICT (phone) DO UPDATE SET phone = EXCLUDED.phone
-              RETURNING id
-            `;
-            
-            // Add a default "reason" so the database doesn't reject it
+          // Check for an existing pending appointment for this patient at this branch
+          const existingAppointment = await sql`
+            SELECT id FROM Appointments
+            WHERE  patient_id = ${patientId}
+              AND  branch_id  = ${branchId}
+              AND  status     = 'Pending'
+            ORDER  BY created_at DESC
+            LIMIT  1
+          `;
+
+          if (existingAppointment.length > 0) {
             await sql`
-              INSERT INTO Appointments (patient_id, slot_id, status, reason)
-              VALUES (${newPatient[0].id}, ${selectedSlotId}, 'Confirmed', 'WhatsApp Widget Booking')
-            `;
-          } else {
-            const patientId = patientResult[0].id;
-
-            const updated = await sql`
               UPDATE Appointments
               SET    slot_id = ${selectedSlotId},
                      status  = 'Confirmed'
-              WHERE  id = (
-                SELECT id FROM Appointments
-                WHERE  patient_id = ${patientId}
-                  AND  status     = 'Pending'
-                ORDER  BY created_at DESC
-                LIMIT  1
-              )
-              RETURNING id
+              WHERE  id      = ${existingAppointment[0].id}
             `;
-
-            if (updated.length === 0) {
-              // Add the default "reason" here too!
-              await sql`
-                INSERT INTO Appointments (patient_id, slot_id, status, reason)
-                VALUES (${patientId}, ${selectedSlotId}, 'Confirmed', 'WhatsApp Widget Booking')
-              `;
-            }
+          } else {
+            await sql`
+              INSERT INTO Appointments (patient_id, branch_id, slot_id, reason, status)
+              VALUES (${patientId}, ${branchId}, ${selectedSlotId}, 'WhatsApp Booking', 'Confirmed')
+            `;
           }
-// Inside Scenario B.2: Patient picked a TIME SLOT
-const slot = lockResult[0];
 
-// If slot.date is already a Date object or a string from SQL:
-const dateObj = new Date(slot.date);
-const sYear = dateObj.getFullYear();
-const sMonth = dateObj.getMonth() + 1; // getMonth is 0-indexed
-const sDay = dateObj.getDate();
+          // Format confirmation date
+          const slot    = lockResult[0];
+          const dateObj = new Date(slot.date);
+          const dateStr = new Date(
+            dateObj.getFullYear(),
+            dateObj.getMonth(),
+            dateObj.getDate()
+          ).toLocaleDateString('en-IN', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+          });
 
-const dateStr = new Date(sYear, sMonth - 1, sDay).toLocaleDateString('en-IN', {
-  weekday: 'long',
-  day: 'numeric',
-  month: 'long',
-});
+          // Get branch name for confirmation message
+          const branchRow = await sql`
+            SELECT name FROM Branches WHERE id = ${branchId} LIMIT 1
+          `;
+          const branchName = branchRow[0]?.name ?? 'V Dental';
 
-await sendWhatsAppText(
-  senderPhone,
-  `✅ *Appointment Confirmed!*\n\nYour appointment is scheduled for:\n📅 *${dateStr}*\n🕐 *${selectedTitle}*\n\nPlease arrive 5 minutes early. See you at Day & Night Dental Clinic! 🦷`
-);
+          await sendWhatsAppText(
+            senderPhone,
+            `✅ *Appointment Confirmed!*\n\nYour appointment is scheduled for:\n📍 *${branchName}*\n📅 *${dateStr}*\n🕐 *${selectedTitle}*\n\nPlease arrive 5 minutes early. See you at V Dental! 🦷`
+          );
         }
       }
 

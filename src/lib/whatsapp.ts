@@ -1,4 +1,3 @@
-// lib/whatsapp.ts
 const GRAPH_API_VERSION = 'v19.0';
 
 const getWhatsAppUrl = () => {
@@ -48,7 +47,7 @@ export async function sendWhatsAppText(to: string, text: string) {
 
 /**
  * Sends a generic interactive list message.
- * Used for both date selection and time slot selection.
+ * Used for branch selection, date selection and time slot selection.
  */
 export async function sendToMetaList(
   to: string,
@@ -85,34 +84,35 @@ export async function sendToMetaList(
 
 /**
  * Sends the time slot selection list.
- * Uses real DB slot IDs so the webhook can lock the correct row.
+ * IDs carry branchId so the webhook can route and lock the correct row.
  */
 export async function sendSlotSelectionList(
   to: string,
   slots: { id: number; time: string }[],
   date: string,
+  branchId: number,
   startIndex: number = 0
 ) {
   const batch = slots.slice(startIndex, startIndex + 9);
 
   const rows = batch.map(slot => ({
-    id: `SLOT_${slot.id}`,
+    id: `SLOT_${branchId}_${slot.id}`,
     title: slot.time,
     description: 'Tap to book this time',
   }));
 
   if (slots.length > startIndex + 9) {
     rows.push({
-      id: `MORE_${date}_${startIndex + 9}`,
+      id: `MORE_${branchId}_${date}_${startIndex + 9}`,
       title: '▶ Show Later Times',
-      description: 'View afternoon & evening slots',
+      description: 'View more slots',
     });
   }
 
   return sendToMetaList(to, {
     header: 'Available Time Slots',
     body: 'Please select your preferred appointment time:',
-    footer: 'Day & Night Dental Clinic',
+    footer: 'V Dental Hospitals',
     buttonLabel: 'View Times',
     sectionTitle: startIndex === 0 ? 'Morning Slots' : 'Later Slots',
     rows,
@@ -120,7 +120,8 @@ export async function sendSlotSelectionList(
 }
 
 /**
- * Sends a pre-approved marketing template (costs money — used for outreach).
+ * Sends a pre-approved template message.
+ * Used for the booking initiation flow from the website form.
  */
 export async function sendOutreachTemplate(
   to: string,

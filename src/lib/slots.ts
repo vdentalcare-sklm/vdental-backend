@@ -1,77 +1,79 @@
 import { sql } from './db';
 
-export async function isDateBlocked(date: string): Promise<boolean> {
+export async function isDateBlocked(date: string, branchId: number): Promise<boolean> {
   const rows = await sql`
-    SELECT 1 FROM BlockedDates WHERE date = ${date}::date LIMIT 1
+    SELECT 1 FROM BlockedDates 
+    WHERE date = ${date}::date 
+      AND branch_id = ${branchId}
+    LIMIT 1
   `;
   return rows.length > 0;
 }
 
-export async function seedSlotsIfNeeded(date: string): Promise<void> {
+export async function seedSlotsIfNeeded(date: string, branchId: number): Promise<void> {
   const existing = await sql`
-    SELECT 1 FROM TimeSlots WHERE date = ${date}::date LIMIT 1
+    SELECT 1 FROM TimeSlots 
+    WHERE date = ${date}::date 
+      AND branch_id = ${branchId}
+    LIMIT 1
   `;
   if (existing.length > 0) return;
 
-  // Use the split method to avoid UTC shifting
-  const [year, month, day] = date.split('-').map(Number);
-  const dateObj = new Date(year, month - 1, day);
-  const dayOfWeek = dateObj.getDay(); 
-
-  // Clinic working hours:
-  // Mon–Sat: 9:30 AM – 7:30 PM
-  // Sunday: 9:30 AM – 1:00 PM
-  const endHour = dayOfWeek === 0 ? 13 : 19;
-  const endMinute = 0;
-
+  // 9:00 AM – 9:00 PM, 30-min intervals, same for all branches all days
   const slotsToInsert: string[] = [];
-  let h = 9, minuteCounter = 30; 
+  let h = 9;
+  let m = 0;
 
-  while (h < endHour || (h === endHour && minuteCounter <= endMinute)) {
-    slotsToInsert.push(`${String(h).padStart(2, '0')}:${String(minuteCounter).padStart(2, '0')}`);
-    minuteCounter += 30;
-    if (minuteCounter === 60) { 
-      minuteCounter = 0; 
-      h++; 
+  while (h < 21) {
+    slotsToInsert.push(
+      `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    );
+    m += 30;
+    if (m === 60) {
+      m = 0;
+      h++;
     }
   }
 
   for (const timeStr of slotsToInsert) {
     await sql`
-      INSERT INTO TimeSlots (date, time, is_booked)
-      VALUES (${date}::date, ${timeStr}::time, FALSE)
+      INSERT INTO TimeSlots (branch_id, date, time, is_booked)
+      VALUES (${branchId}, ${date}::date, ${timeStr}::time, FALSE)
       ON CONFLICT DO NOTHING
     `;
   }
 }
 
 export async function getAvailableSlots(
-  date: string
+  date: string,
+  branchId: number
 ): Promise<{ id: number; time: string }[]> {
-  await seedSlotsIfNeeded(date);
+  await seedSlotsIfNeeded(date, branchId);
 
   const todayIST = getTodayIST();
-  
-  // Get current time in IST (HH:mm)
-  const nowIST = new Date().toLocaleTimeString('en-GB', { 
-    timeZone: 'Asia/Kolkata', 
-    hour12: false, 
-    hour: '2-digit', 
-    minute: '2-digit' 
+
+  const nowIST = new Date().toLocaleTimeString('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
   });
 
   const rows = await sql`
     SELECT t.id, to_char(t.time, 'HH12:MI AM') AS slot_time
     FROM   TimeSlots t
-    WHERE  t.date      = ${date}::date
+    WHERE  t.branch_id = ${branchId}
+      AND  t.date      = ${date}::date
       AND  t.is_booked = FALSE
       AND  (
-        ${date} != ${todayIST} 
+        ${date} != ${todayIST}
         OR t.time > ${nowIST}::time
       )
       AND  NOT EXISTS (
         SELECT 1 FROM BlockedSlots b
-        WHERE  b.date = t.date AND b.time = t.time
+        WHERE  b.branch_id = ${branchId}
+          AND  b.date      = t.date
+          AND  b.time      = t.time
       )
     ORDER BY t.time ASC
   `;
