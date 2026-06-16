@@ -90,13 +90,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Branch not found.' }, { status: 404 });
     }
 
-    // Reject past dates
-    const [year, month, day] = date.split('-').map(Number);
-    const slotDate = new Date(year, month - 1, day);
-    const today    = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    if (slotDate < today) {
+    const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    if (date < todayIST) {
       return NextResponse.json(
         { error: 'Cannot add slots for past dates.' },
         { status: 400 }

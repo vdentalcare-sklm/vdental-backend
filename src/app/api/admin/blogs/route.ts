@@ -12,7 +12,12 @@ export async function GET(request: Request) {
   if (!isAuthorized(request)) return new NextResponse('Unauthorized', { status: 401 });
 
   try {
-    const posts = await sql`SELECT * FROM BlogPosts ORDER BY created_at DESC`;
+    const posts = await sql`
+        SELECT id, title, slug, excerpt, image_url, category, author, is_featured, created_at 
+        FROM BlogPosts 
+        WHERE is_published = TRUE 
+        ORDER BY created_at DESC
+      `;
     return NextResponse.json({ success: true, posts });
   } catch (error) {
     return NextResponse.json({ error: 'Failed to fetch blogs.' }, { status: 500 });

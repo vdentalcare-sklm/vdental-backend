@@ -212,7 +212,7 @@ export async function POST(request: Request) {
             SELECT id FROM Branches WHERE id = ${branchId} AND is_active = TRUE LIMIT 1
           `;
 
-          if (branch.length === 0) {
+if (branch.length === 0) {
             await sendWhatsAppText(
               senderPhone,
               'Sorry, that branch is no longer available. Please choose another:'
@@ -220,6 +220,19 @@ export async function POST(request: Request) {
             await sendBranchSelectionList(senderPhone);
             return;
           }
+
+          await sql`
+            UPDATE Appointments
+            SET    branch_id = ${branchId}
+            WHERE  id = (
+              SELECT a.id FROM Appointments a
+              JOIN   Patients p ON a.patient_id = p.id
+              WHERE  p.phone  = ${senderPhone}
+                AND  a.status = 'Pending'
+              ORDER  BY a.created_at DESC
+              LIMIT  1
+            )
+          `;
 
           await sendDateSelectionList(senderPhone, branchId);
           return;
