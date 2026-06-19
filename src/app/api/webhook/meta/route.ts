@@ -78,10 +78,10 @@ async function sendBranchSelectionList(to: string): Promise<void> {
     return;
   }
 
-  const rows = branches.map((b: any) => ({
+const rows = branches.map((b: any) => ({
     id: `BRANCH_${b.id}`,
     title: b.name,
-    description: b.address,
+    description: b.address.length > 72 ? b.address.slice(0, 69) + '...' : b.address,
   }));
 
   await sendToMetaList(to, {

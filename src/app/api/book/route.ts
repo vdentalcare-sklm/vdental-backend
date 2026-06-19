@@ -7,7 +7,6 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { name, phone, email, reason } = body;
 
-    // ── Validation ────────────────────────────────────────────────────────────
     if (!name || !phone) {
       return NextResponse.json(
         { error: 'Name and phone are required.' },
@@ -15,7 +14,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // ── Phone sanitization ────────────────────────────────────────────────────
     let cleanPhone = String(phone).replace(/\D/g, '');
 
     if (cleanPhone.length === 12 && cleanPhone.startsWith('91')) {
@@ -33,7 +31,6 @@ export async function POST(request: Request) {
 
     const whatsappPhone = `91${cleanPhone}`;
 
-    // ── Upsert patient ────────────────────────────────────────────────────────
     const patientResult = await sql`
       INSERT INTO Patients (name, phone, email)
       VALUES (${name.trim()}, ${whatsappPhone}, ${email?.trim() ?? null})
@@ -44,40 +41,13 @@ export async function POST(request: Request) {
     `;
     const patientId = patientResult[0].id;
 
-    // ── Get default branch (is_main = TRUE) as a fallback ────────────────────
-    // The actual branch will be confirmed by the patient via WhatsApp
-    const mainBranch = await sql`
-      SELECT id FROM Branches WHERE is_main = TRUE AND is_active = TRUE LIMIT 1
-    `;
-
-    // If somehow no main branch exists, grab the first active one
-    const fallbackBranch = mainBranch.length === 0
-      ? await sql`SELECT id FROM Branches WHERE is_active = TRUE ORDER BY display_order ASC LIMIT 1`
-      : mainBranch;
-
-    if (fallbackBranch.length === 0) {
-      console.error('No active branches found in database.');
-      return NextResponse.json(
-        { error: 'No branches are currently available. Please call us.' },
-        { status: 503 }
-      );
-    }
-
-    const branchId = fallbackBranch[0].id;
-
-    // ── Create pending appointment ────────────────────────────────────────────
-    // Status is Pending — branch will be confirmed/updated via WhatsApp flow
-    // slot_id is null until patient picks a time slot on WhatsApp
+    // Create pending appointment with no branch yet —
+    // branch will be set once the patient picks one on WhatsApp
     await sql`
-      INSERT INTO Appointments (patient_id, branch_id, reason, status)
-      VALUES (${patientId}, ${branchId}, ${reason?.trim() ?? null}, 'Pending')
+      INSERT INTO Appointments (patient_id, reason, status)
+      VALUES (${patientId}, ${reason?.trim() ?? null}, 'Pending')
     `;
 
-    // ── Send booking initiation template ──────────────────────────────────────
-    // This fires the first WhatsApp message to the patient.
-    // Template "booking_initiation" must be approved in Meta Business dashboard.
-    // {{1}} = patient name, {{2}} = reason for visit
-    // When the patient replies, the webhook takes over with Branch → Date → Time flow.
     await sendOutreachTemplate(
       whatsappPhone,
       'booking_initiation',

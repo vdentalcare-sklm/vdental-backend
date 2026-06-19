@@ -53,7 +53,7 @@ export async function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS Appointments (
         id         SERIAL PRIMARY KEY,
         patient_id INTEGER NOT NULL REFERENCES Patients(id),
-        branch_id  INTEGER NOT NULL REFERENCES Branches(id),
+        branch_id  INTEGER REFERENCES Branches(id),
         slot_id    INTEGER REFERENCES TimeSlots(id),
         reason     TEXT,
         status     VARCHAR(50) DEFAULT 'Pending',

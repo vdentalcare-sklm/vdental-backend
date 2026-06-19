@@ -36,9 +36,9 @@ export async function GET(request: Request) {
         t.id                             AS slot_id,
         to_char(t.date, 'YYYY-MM-DD')   AS slot_date,
         to_char(t.time, 'HH12:MI AM')   AS slot_time
-      FROM      Appointments a
+FROM      Appointments a
       JOIN      Patients     p ON a.patient_id = p.id
-      JOIN      Branches     b ON a.branch_id  = b.id
+      LEFT JOIN Branches     b ON a.branch_id  = b.id
       LEFT JOIN TimeSlots    t ON a.slot_id    = t.id
       WHERE
         (${status   ?? null}::text    IS NULL OR a.status    = ${status   ?? null}::text)
