@@ -184,16 +184,18 @@ export async function POST(request: Request) {
       }
 
       // ── Scenario A.2: "View Slots" quick reply button on template ───────────
-      if (msg.type === 'button') {
-        const buttonText = (msg.button.text as string).toLowerCase();
-        if (buttonText === 'view slots') {
+if (msg.type === 'button') {
+        console.log('BUTTON:', JSON.stringify(msg.button));
+        const buttonText = (msg.button?.text as string ?? '').toLowerCase().trim();
+        if (buttonText.includes('slot') || buttonText.includes('view')) {
           await sendBranchSelectionList(senderPhone);
         }
       }
 
-      if (msg.type === 'interactive' && msg.interactive?.type === 'button_reply') {
-        const buttonTitle = (msg.interactive.button_reply.title as string).toLowerCase();
-        if (buttonTitle === 'view slots') {
+if (msg.type === 'interactive' && msg.interactive?.type === 'button_reply') {
+        console.log('INTERACTIVE BUTTON:', JSON.stringify(msg.interactive));
+        const buttonTitle = (msg.interactive.button_reply?.title as string ?? '').toLowerCase().trim();
+        if (buttonTitle.includes('slot') || buttonTitle.includes('view')) {
           await sendBranchSelectionList(senderPhone);
         }
       }
