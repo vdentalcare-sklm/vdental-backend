@@ -160,6 +160,9 @@ export async function POST(request: Request) {
       const msg         = messages[0];
       const senderPhone = msg.from;
 
+      console.log('MSG TYPE:', msg.type);
+      console.log('MSG FULL:', JSON.stringify(msg, null, 2));
+
       // ── Scenario A: Plain text message ──────────────────────────────────────
       if (msg.type === 'text') {
         const textBody = (msg.text.body as string).toLowerCase();
