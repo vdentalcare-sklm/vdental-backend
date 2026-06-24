@@ -148,6 +148,8 @@ export async function POST(request: Request) {
     return new NextResponse('Forbidden', { status: 403 });
   }
 
+  console.log('Webhook POST received, raw body length:', rawBody.length);
+
   after(async () => {
     try {
       const body = JSON.parse(rawBody);
