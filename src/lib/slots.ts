@@ -19,19 +19,33 @@ export async function seedSlotsIfNeeded(date: string, branchId: number): Promise
   `;
   if (existing.length > 0) return;
 
-  // 9:00 AM – 9:00 PM, 30-min intervals, same for all branches all days
+  const [year, month, day] = date.split('-').map(Number);
+  const dateObj = new Date(year, month - 1, day);
+  const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 6 = Saturday
+
   const slotsToInsert: string[] = [];
+
+  // Morning session: 9:00 AM – 2:00 PM (all days)
   let h = 9;
   let m = 0;
-
-  while (h < 21) {
+  while (h < 14) {
     slotsToInsert.push(
       `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
     );
     m += 30;
-    if (m === 60) {
-      m = 0;
-      h++;
+    if (m === 60) { m = 0; h++; }
+  }
+
+  // Afternoon session: 4:00 PM – 8:00 PM (Mon–Sat only, not Sunday)
+  if (dayOfWeek !== 0) {
+    h = 16;
+    m = 0;
+    while (h < 20) {
+      slotsToInsert.push(
+        `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+      );
+      m += 30;
+      if (m === 60) { m = 0; h++; }
     }
   }
 
