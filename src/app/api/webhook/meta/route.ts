@@ -148,8 +148,6 @@ export async function POST(request: Request) {
     return new NextResponse('Forbidden', { status: 403 });
   }
 
-  console.log('Webhook POST received, raw body length:', rawBody.length);
-
   after(async () => {
     try {
       const body = JSON.parse(rawBody);
@@ -161,9 +159,6 @@ export async function POST(request: Request) {
 
       const msg         = messages[0];
       const senderPhone = msg.from;
-
-      console.log('MSG TYPE:', msg.type);
-      console.log('MSG FULL:', JSON.stringify(msg, null, 2));
 
       // ── Scenario A: Plain text message ──────────────────────────────────────
       if (msg.type === 'text') {
@@ -185,7 +180,6 @@ export async function POST(request: Request) {
 
       // ── Scenario A.2: "View Slots" quick reply button on template ───────────
 if (msg.type === 'button') {
-        console.log('BUTTON:', JSON.stringify(msg.button));
         const buttonText = (msg.button?.text as string ?? '').toLowerCase().trim();
         if (buttonText.includes('slot') || buttonText.includes('view')) {
           await sendBranchSelectionList(senderPhone);
@@ -193,7 +187,6 @@ if (msg.type === 'button') {
       }
 
 if (msg.type === 'interactive' && msg.interactive?.type === 'button_reply') {
-        console.log('INTERACTIVE BUTTON:', JSON.stringify(msg.interactive));
         const buttonTitle = (msg.interactive.button_reply?.title as string ?? '').toLowerCase().trim();
         if (buttonTitle.includes('slot') || buttonTitle.includes('view')) {
           await sendBranchSelectionList(senderPhone);
